@@ -57,9 +57,15 @@ script /dev/null
 screen ./stack.sh
 
 
-ovs-vsctl add-br br-eth1
-ovs-vsctl add-port br-eth1 eth1
+sudo ovs-vsctl add-br br-eth1
+sudo ovs-vsctl add-port br-eth1 eth1
 
+
+# get admin credentials. If you don't want to create extra file, you can
+# replace demo user to admin user and read openrc file.
+
+sed -i -e "s/demo/admin/g" openrc
+source openrc
 
 
 ### ADD into [OVS] section values: ####
@@ -93,6 +99,27 @@ ERROR (ConnectionRefused): Unable to establish connection to http://92.222.XXX.X
 
 # probably keystone service is down. Type this:
 screen /usr/local/bin/keystone-all
+
+
+# If you have problem like this:
+##+ kill_spinner
+##+ '[' '!' -z '' ']'
+##+ [[ 1 -ne 0 ]]
+##+ echo 'Error on exit'
+##Error on exit
+##+ [[ -z '' ]]
+##+ ./tools/worlddump.py
+##World dumping... see ./worlddump-.... for details
+##
+
+# to this:
+
+#./clean.sh
+#sudo rm -rf /opt/stack
+#shutdown -r now 
+
+# after reboot, try again ./stack.sh ;)
+
 
 
 nova boot --flavor m1.small --image cirros-0.3.4-x86_64-uec --nic net-id=`neutron net-list | grep flat-provider-network | awk '{print $2}'` Flat-instance-test
