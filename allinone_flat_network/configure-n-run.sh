@@ -48,6 +48,20 @@ iface br-eth1 inet static
     up ip link set $IFACE promisc on
     down ip link set $IFACE promisc off
 
+# OR:
+
+#auto eth1
+#iface eth1 inet manual
+# up ip address add 0/0 dev $IFACE
+# up ip link set $IFACE up
+# down ip link set $IFACE down
+#
+#auto br-eth1
+#iface br-eth1 inet static
+#    address 10.0.0.2
+#    netmask 255.255.255.0
+#    gateway 10.0.0.1
+
 EOF
 
 service networking restart
