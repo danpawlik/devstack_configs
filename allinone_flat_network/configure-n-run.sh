@@ -64,6 +64,8 @@ iface br-eth1 inet static
 
 EOF
 
+
+
 service networking restart
 
 
@@ -89,20 +91,35 @@ vim /etc/neutron/plugins/ml2/ml2_conf.ini
 [ovs]
 network_vlan_ranges = physnet1
 bridge_mappings = physnet1:br-eth1
+local_ip = ...
 
 
 # add into /etc/nova/nova.conf : ###
 
 echo "service_neutron_metadata_proxy=false" >> /etc/nova/nova.conf
 
+./unstack.sh
+./rejoin-stack.sh
+
+script /dev/null
+screen /usr/local/bin/keystone-all
+
+wget http://uec-images.ubuntu.com/releases/14.04/release/ubuntu-14.04-server-cloudimg-amd64-disk1.img 
+
+glance image-create --name Ubuntu14.04.3 --disk-format qcow2 --container-format bare --file ubuntu-14.04-server-cloudimg-amd64-disk1.img --is-publi True --progress
+
+cat > user-data << EOF
+#cloud-config
+user: ubuntu
+password: ubuntu
+chpasswd: {expire: False}
+ssh_pwauth: True
+
+EOF
 
 neutron net-create flat-provider-network --shared  --provider:network_type flat --provider:physical_network physnet1
 
 neutron subnet-create --name flat-provider-subnet --gateway 10.0.0.1 --dns-nameserver 8.8.8.8  --allocation-pool start=10.0.0.100,end=10.0.0.150  flat-provider-network 10.0.0.0/24
-
-./unstack.sh
-
-./rejoin-stack.sh
 
 neutron net-list
 
@@ -114,6 +131,8 @@ ERROR (ConnectionRefused): Unable to establish connection to http://92.222.XXX.X
 # probably keystone service is down. Type this:
 screen /usr/local/bin/keystone-all
 
+
+#############################
 
 # If you have problem like this:
 ##+ kill_spinner
@@ -134,9 +153,9 @@ screen /usr/local/bin/keystone-all
 
 # after reboot, try again ./stack.sh ;)
 
+############################
 
-
-nova boot --flavor m1.small --image cirros-0.3.4-x86_64-uec --nic net-id=`neutron net-list | grep flat-provider-network | awk '{print $2}'` Flat-instance-test
+nova boot --flavor m1.small --image Ubuntu14.04.3  --nic net-id=`neutron net-list | grep flat-provider-network | awk '{print $2}'` --user-data user-data Flat-instance-test
 
 # Now when you sign in into instance Flat-instance-test for example: 
 
