@@ -21,7 +21,7 @@ ln -s local.conf localrc
 
 ################## SET NETWORK #########################
 
-cat > /etc/network/interfaces
+> /etc/network/interfaces
 
 cat > /etc/network/interfaces << EOF 
 
@@ -36,35 +36,24 @@ iface eth0 inet dhcp
 # Local network interface - network address 10.0.0.0/24
 auto eth1
 iface eth1 inet manual
-    up ifconfig $IFACE 0.0.0.0 up
+    up ip address add 0/0 dev $IFACE
+    up ip link set $IFACE up
     up ip link set $IFACE promisc on
     down ip link set $IFACE promisc off
-    down ifconfig $IFACE down
+    down ip link set $IFACE down
 
 auto br-eth1
 iface br-eth1 inet static
     address 10.0.0.2
     netmask 255.255.255.0
+    gateway 10.0.0.1
     up ip link set $IFACE promisc on
     down ip link set $IFACE promisc off
-
-# OR:
-
-#auto eth1
-#iface eth1 inet manual
-# up ip address add 0/0 dev $IFACE
-# up ip link set $IFACE up
-# down ip link set $IFACE down
-#
-#auto br-eth1
-#iface br-eth1 inet static
-#    address 10.0.0.2
-#    netmask 255.255.255.0
-#    gateway 10.0.0.1
-
 EOF
 
 
+sudo sysctl -w net.ipv4.conf.eth1.proxy_arp=1
+sudo sysctl -w net.ipv4.ip_forward=1
 
 service networking restart
 
@@ -91,12 +80,13 @@ vim /etc/neutron/plugins/ml2/ml2_conf.ini
 [ovs]
 network_vlan_ranges = physnet1
 bridge_mappings = physnet1:br-eth1
-local_ip = ...
 
 
-# add into /etc/nova/nova.conf : ###
+nova secgroup-add-rule default icmp -1 -1 0.0.0.0/0
+nova secgroup-add-rule default tcp 22 22 0.0.0.0/0
 
-echo "service_neutron_metadata_proxy=false" >> /etc/nova/nova.conf
+sudo iptables -t nat -A POSTROUTING -o eth1 -j MASQUERADE
+
 
 ./unstack.sh
 ./rejoin-stack.sh
@@ -162,3 +152,4 @@ nova boot --flavor m1.small --image Ubuntu14.04.3  --nic net-id=`neutron net-lis
 nova get-vnc-console Flat-instance-test novnc
 
 # You should ping to another host in local network.
+
