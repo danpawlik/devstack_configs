@@ -23,6 +23,7 @@ ln -s local.conf localrc
 
 > /etc/network/interfaces
 
+# change local IP address
 cat > /etc/network/interfaces << EOF 
 
 # The loopback network interface
@@ -57,7 +58,6 @@ sudo sysctl -w net.ipv4.ip_forward=1
 
 service networking restart
 
-
 script /dev/null
 screen ./stack.sh
 
@@ -68,34 +68,32 @@ sudo ovs-vsctl add-port br-eth1 eth1
 
 # get admin credentials. If you don't want to create extra file, you can
 # replace demo user to admin user and read openrc file.
-
+# or you can use: source openrc admin admin
 sed -i -e "s/demo/admin/g" openrc
 source openrc
 
 
-### ADD into [OVS] section values: ####
-
+### check [OVS] section values: ####
 vim /etc/neutron/plugins/ml2/ml2_conf.ini
 
 [ovs]
 network_vlan_ranges = physnet1
-bridge_mappings = physnet1:br-eth1
+bridge_mappings = physnet1:br-eth1 
 
-
-nova secgroup-add-rule default icmp -1 -1 0.0.0.0/0
-nova secgroup-add-rule default tcp 22 22 0.0.0.0/0
-
-sudo iptables -t nat -A POSTROUTING -o eth1 -j MASQUERADE
-
-
+################################################################
+# if you don't have bridge_mappings you must run this commands:
 ./unstack.sh
 ./rejoin-stack.sh
 
+# if you have some problems with keystone or you have some error which use port 5000, probably keystone service is down. Please check if keystone service is running:
+ps aux | grep keystone 
+
+# if not, run this:
 script /dev/null
 screen /usr/local/bin/keystone-all
+################################################################
 
 wget http://uec-images.ubuntu.com/releases/14.04/release/ubuntu-14.04-server-cloudimg-amd64-disk1.img 
-
 glance image-create --name Ubuntu14.04.3 --disk-format qcow2 --container-format bare --file ubuntu-14.04-server-cloudimg-amd64-disk1.img --is-publi True --progress
 
 cat > user-data << EOF
@@ -104,17 +102,38 @@ user: ubuntu
 password: ubuntu
 chpasswd: {expire: False}
 ssh_pwauth: True
-
 EOF
 
-neutron net-create flat-provider-network --shared  --provider:network_type flat --provider:physical_network physnet1
+# create flat local network
+neutron net-create flat-local-network --shared  --provider:network_type flat --provider:physical_network physnet1
+neutron subnet-create --name flat-local-subnet --gateway 10.0.0.1 --dns-nameserver 8.8.8.8  --allocation-pool start=10.0.0.100,end=10.0.0.150  flat-local-network 10.0.0.0/24
 
-neutron subnet-create --name flat-provider-subnet --gateway 10.0.0.1 --dns-nameserver 8.8.8.8  --allocation-pool start=10.0.0.100,end=10.0.0.150  flat-provider-network 10.0.0.0/24
+
+# create public-network with NAT translation
+# script taken from https://github.com/saurabhsurana/trove-dev/
+NETWORK_NAME=${1:-PUBLIC_NAT}
+PUBLIC_NAT_NETWORK=$(neutron net-create ${NETWORK_NAME} | grep " id " | get_field 2)
+SUBNET=$(neutron subnet-create ${PUBLIC_NAT_NETWORK} 172.20.4.0/24 --dns-nameserver 8.8.8.8  --name ${NETWORK_NAME}-subnet | grep " id " | get_field 2)
+ROUTER=$(neutron router-create default-router | grep " id " | get_field 2)
+PUBLIC_NETWORK=$(neutron net-show public| grep " id " | get_field 2)
+neutron router-gateway-set ${ROUTER} ${PUBLIC_NETWORK}
+neutron router-interface-add ${ROUTER} ${SUBNET}
+ROUTER_IP=$(neutron router-show ${ROUTER}|grep external_gateway_info|cut -d '|' -f 3|python -m json.tool|grep ip_address|cut -d ':' -f 2|sed "s/\"//g;s/.$//")
+sudo route add -net 172.20.4.0/24 gw $ROUTER_IP dev br-ex
+
+sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+sudo iptables-save
 
 neutron net-list
 
-## If you see this message:
+# open all ports 
+nova secgroup-add-rule default icmp -1 -1 0.0.0.0/0
+nova secgroup-add-rule default tcp 1 65535 0.0.0.0/0
+nova secgroup-add-rule default udp 1 65535 0.0.0.0/0
 
+
+
+## If you see this message:
 No handlers could be found for logger "keystoneclient.auth.identity.generic.base"
 ERROR (ConnectionRefused): Unable to establish connection to http://92.222.XXX.XXX:5000/v2.0/tokens
 
@@ -137,19 +156,18 @@ screen /usr/local/bin/keystone-all
 
 # to this:
 
-#./clean.sh
-#sudo rm -rf /opt/stack
-#shutdown -r now 
+# ./clean.sh
+# sudo rm -rf /opt/stack
+# shutdown -r now 
 
 # after reboot, try again ./stack.sh ;)
 
 ############################
 
-nova boot --flavor m1.small --image Ubuntu14.04.3  --nic net-id=`neutron net-list | grep flat-provider-network | awk '{print $2}'` --user-data user-data Flat-instance-test
+nova boot --flavor m1.small --image Ubuntu14.04.3 --nic net-id=`neutron net-list | grep PUBLIC_NAT | awk '{print $2}'`  --nic net-id=`neutron net-list | grep flat-local-network | awk '{print $2}'`  --user-data user-data instance-test
 
 # Now when you sign in into instance Flat-instance-test for example: 
-
-nova get-vnc-console Flat-instance-test novnc
+nova get-vnc-console instance-test novnc
 
 # You should ping to another host in local network.
 
